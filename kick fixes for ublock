@@ -1,58 +1,3 @@
-! Title: Kick.com - faster load, less CPU, pause emote animations
-! Description: One file with two roles in uBlock Origin:
-!   1. Filter list: blocks the third-party telemetry, session-replay and
-!      ad-bidding scripts kick.com loads on every page.
-!   2. Scriptlet resource: adds a "Pause emote animations" switch to Kick's
-!      chat settings (gear icon in chat).
-! Install:
-!   a. Host this file at a URL (e.g. a GitHub Gist "Raw" link).
-!   b. Dashboard > Filter lists > Import... > paste the URL > Apply changes.
-!      (Or paste this whole file into "My filters" instead.)
-!   c. Settings > tick "I am an advanced user" > gear icon > set
-!      userResourcesLocation to the same URL > Apply changes > restart browser.
-! Every rule is scoped to kick.com; other sites are unaffected.
-!
-! Deliberately NOT blocked (the site needs them):
-!   js.stripe.com (subs/payments), google.com/recaptcha + gstatic.com (login),
-!   flags.kick.com (feature flags), /cdn-cgi/challenge-platform (Cloudflare),
-!   imasdk.googleapis.com (uBO's built-in lists already swap it for a stub;
-!   a hard block can stall the player), live-video.net (the stream itself).
-
-! --- Telemetry / real-user monitoring / player analytics ---------------------
-||datadoghq-browser-agent.com^$domain=kick.com
-||browser-intake-datadoghq.com^$domain=kick.com
-||litix.io^$domain=kick.com
-||datazoom.io^$domain=kick.com
-||analytics.tiktok.com^$domain=kick.com
-||google-analytics.com^$domain=kick.com
-||googletagmanager.com^$domain=kick.com
-
-! --- Ad auction, ID-sync and ad-verification chatter ------------------------
-||doubleclick.net^$domain=kick.com
-||googlesyndication.com^$domain=kick.com
-||adtrafficquality.google^$domain=kick.com
-||id5-sync.com^$domain=kick.com
-||openx.net^$domain=kick.com
-||openxcdn.net^$domain=kick.com
-||criteo.com^$domain=kick.com
-||criteo.net^$domain=kick.com
-||creativecdn.com^$domain=kick.com
-||analytics.yahoo.com^$domain=kick.com
-
-! --- Collapse the now-empty banner slot above the channel info --------------
-kick.com##div[id^="channel-masthead--"]
-kick.com##div[id^="google_ads_iframe_"]
-
-! --- Run the scriptlet defined at the bottom of this file -------------------
-kick.com##+js(kick-tweaks)
-
-! --- Scriptlet source --------------------------------------------------------
-! The filter-list parser skips everything inside "!#if false"; the resource
-! loader (userResourcesLocation) reads the block that starts at "/// name".
-! When editing: no blank lines inside the function (a blank line ends the
-! scriptlet), keep the body indented, and keep the blank line before !#endif.
-!#if false
-/// kick-tweaks.js
 (function() {
     'use strict';
     if (window.ktLoaded) { return; }
@@ -220,6 +165,53 @@ kick.com##+js(kick-tweaks)
         list.appendChild(row);
     }
     //
+    // ---- start every stream at its highest quality ------------------------
+    // Kick's player reads sessionStorage "stream_quality" (a height) when it
+    // becomes ready and falls back to Auto, which is capped at 720p. The video
+    // worker announces the stream's quality list just before that, so the
+    // preference is written at that moment. A quality picked by hand is kept
+    // for as long as you stay on that channel. Logged-out viewers get the best
+    // quality Kick offers without an account (1080p and up needs a login).
+    const QUALITY_KEY = 'stream_quality';
+    const QUALITY_MARK = 'kt:autoQuality';
+    const LOGIN_MIN_PX = 1080;
+    let qualityPath = null;
+    function onQualities(list) {
+        if (!Array.isArray(list) || list.length === 0) { return; }
+        const path = location.pathname;
+        if (path === qualityPath) { return; }
+        qualityPath = path;
+        const guest = document.querySelector('[data-testid="login"]') !== null;
+        let top = 0;
+        for (let i = 0; i < list.length; i++) {
+            const q = list[i];
+            if (!q || !(q.height > top)) { continue; }
+            if (guest && Math.min(q.width, q.height) >= LOGIN_MIN_PX) { continue; }
+            top = q.height;
+        }
+        if (top === 0) { return; }
+        const cur = sessionStorage.getItem(QUALITY_KEY);
+        let mark = null;
+        try { mark = JSON.parse(sessionStorage.getItem(QUALITY_MARK)); } catch (e) {}
+        if (cur !== null && mark && mark.path === path && cur !== String(mark.height)) { return; }
+        sessionStorage.setItem(QUALITY_KEY, String(top));
+        sessionStorage.setItem(QUALITY_MARK, JSON.stringify({ path: path, height: top }));
+    }
+    function onWorkerMessage(ev) {
+        const arg = ev.data && ev.data.arg;
+        if (!arg || arg.key !== 'qualities') { return; }
+        try { onQualities(arg.value); } catch (e) {}
+    }
+    if (typeof window.Worker === 'function') {
+        window.Worker = new Proxy(window.Worker, {
+            construct: function(target, args, newTarget) {
+                const worker = Reflect.construct(target, args, newTarget);
+                try { worker.addEventListener('message', onWorkerMessage); } catch (e) {}
+                return worker;
+            }
+        });
+    }
+    //
     // ---- one observer drives both -----------------------------------------
     new MutationObserver(function(muts) {
         if (paused) {
@@ -243,5 +235,3 @@ kick.com##+js(kick-tweaks)
     apply();
     ensureRow();
 })();
-
-!#endif
