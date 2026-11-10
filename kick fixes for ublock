@@ -1,0 +1,247 @@
+! Title: Kick.com - faster load, less CPU, pause emote animations
+! Description: One file with two roles in uBlock Origin:
+!   1. Filter list: blocks the third-party telemetry, session-replay and
+!      ad-bidding scripts kick.com loads on every page.
+!   2. Scriptlet resource: adds a "Pause emote animations" switch to Kick's
+!      chat settings (gear icon in chat).
+! Install:
+!   a. Host this file at a URL (e.g. a GitHub Gist "Raw" link).
+!   b. Dashboard > Filter lists > Import... > paste the URL > Apply changes.
+!      (Or paste this whole file into "My filters" instead.)
+!   c. Settings > tick "I am an advanced user" > gear icon > set
+!      userResourcesLocation to the same URL > Apply changes > restart browser.
+! Every rule is scoped to kick.com; other sites are unaffected.
+!
+! Deliberately NOT blocked (the site needs them):
+!   js.stripe.com (subs/payments), google.com/recaptcha + gstatic.com (login),
+!   flags.kick.com (feature flags), /cdn-cgi/challenge-platform (Cloudflare),
+!   imasdk.googleapis.com (uBO's built-in lists already swap it for a stub;
+!   a hard block can stall the player), live-video.net (the stream itself).
+
+! --- Telemetry / real-user monitoring / player analytics ---------------------
+||datadoghq-browser-agent.com^$domain=kick.com
+||browser-intake-datadoghq.com^$domain=kick.com
+||litix.io^$domain=kick.com
+||datazoom.io^$domain=kick.com
+||analytics.tiktok.com^$domain=kick.com
+||google-analytics.com^$domain=kick.com
+||googletagmanager.com^$domain=kick.com
+
+! --- Ad auction, ID-sync and ad-verification chatter ------------------------
+||doubleclick.net^$domain=kick.com
+||googlesyndication.com^$domain=kick.com
+||adtrafficquality.google^$domain=kick.com
+||id5-sync.com^$domain=kick.com
+||openx.net^$domain=kick.com
+||openxcdn.net^$domain=kick.com
+||criteo.com^$domain=kick.com
+||criteo.net^$domain=kick.com
+||creativecdn.com^$domain=kick.com
+||analytics.yahoo.com^$domain=kick.com
+
+! --- Collapse the now-empty banner slot above the channel info --------------
+kick.com##div[id^="channel-masthead--"]
+kick.com##div[id^="google_ads_iframe_"]
+
+! --- Run the scriptlet defined at the bottom of this file -------------------
+kick.com##+js(kick-tweaks)
+
+! --- Scriptlet source --------------------------------------------------------
+! The filter-list parser skips everything inside "!#if false"; the resource
+! loader (userResourcesLocation) reads the block that starts at "/// name".
+! When editing: no blank lines inside the function (a blank line ends the
+! scriptlet), keep the body indented, and keep the blank line before !#endif.
+!#if false
+/// kick-tweaks.js
+(function() {
+    'use strict';
+    if (window.ktLoaded) { return; }
+    window.ktLoaded = true;
+    const KEY = 'kt:pauseEmotes';
+    const EMOTE_URL = 'files.kick.com/emotes/';
+    const EMOTE_SEL = 'img[src*="' + EMOTE_URL + '"]';
+    const STILL_MAX_PX = 112;
+    const stills = new Map();
+    let paused = false;
+    let hovered = null;
+    let styled = false;
+    try { paused = localStorage.getItem(KEY) === '1'; } catch (e) {}
+    //
+    // ---- first-frame extraction -------------------------------------------
+    function isAnimated(blob) {
+        return blob.slice(0, 256).arrayBuffer().then(function(buf) {
+            const b = new Uint8Array(buf);
+            const s = String.fromCharCode.apply(null, b);
+            if (s.lastIndexOf('GIF8', 0) === 0) { return true; }
+            if (s.slice(8, 16) === 'WEBPVP8X') { return (b[20] & 2) !== 0; }
+            if (s.slice(1, 4) === 'PNG') { return s.indexOf('acTL') !== -1; }
+            return false;
+        });
+    }
+    function toStill(blob) {
+        return createImageBitmap(blob).then(function(bmp) {
+            const k = Math.min(1, STILL_MAX_PX / bmp.height);
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(bmp.width * k));
+            c.height = Math.max(1, Math.round(bmp.height * k));
+            c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+            bmp.close();
+            return new Promise(function(resolve) {
+                c.toBlob(function(out) {
+                    resolve(out ? URL.createObjectURL(out) : null);
+                }, 'image/png');
+            });
+        });
+    }
+    // Resolves to a blob: URL of the first frame, or null for static emotes.
+    function getStill(src) {
+        let p = stills.get(src);
+        if (p) { return p; }
+        p = fetch(src).then(function(r) {
+            if (!r.ok) { throw new Error('http ' + r.status); }
+            return r.blob();
+        }).then(function(blob) {
+            return isAnimated(blob).then(function(anim) {
+                return anim ? toStill(blob) : null;
+            });
+        }).catch(function() {
+            stills.delete(src);
+            return null;
+        });
+        stills.set(src, p);
+        return p;
+    }
+    //
+    // ---- freezing / thawing emote <img>s ----------------------------------
+    function freeze(img) {
+        if (!paused || img === hovered) { return; }
+        const src = img.src;
+        if (src.indexOf(EMOTE_URL) === -1) { return; }
+        if (img.closest('[contenteditable="true"]')) { return; }
+        getStill(src).then(function(url) {
+            if (!url || !paused || img === hovered || img.src !== src) { return; }
+            img.dataset.ktOrig = src;
+            img.src = url;
+        });
+    }
+    function thaw(img) {
+        const orig = img.dataset.ktOrig;
+        if (!orig) { return; }
+        delete img.dataset.ktOrig;
+        if (img.src.lastIndexOf('blob:', 0) === 0) { img.src = orig; }
+    }
+    function scan(root) {
+        if (!root || root.nodeType !== 1) { return; }
+        if (root.tagName === 'IMG') { freeze(root); return; }
+        if (!root.firstElementChild) { return; }
+        const imgs = root.querySelectorAll(EMOTE_SEL);
+        for (let i = 0; i < imgs.length; i++) { freeze(imgs[i]); }
+    }
+    function apply() {
+        if (paused) {
+            scan(document.documentElement);
+        } else {
+            document.querySelectorAll('img[data-kt-orig]').forEach(thaw);
+        }
+        document.querySelectorAll('.kt-switch').forEach(function(sw) {
+            sw.setAttribute('aria-checked', String(paused));
+        });
+    }
+    function setPaused(value) {
+        paused = value;
+        try { localStorage.setItem(KEY, value ? '1' : '0'); } catch (e) {}
+        apply();
+    }
+    // Hovering a frozen emote plays it; leaving freezes it again.
+    document.addEventListener('mouseover', function(ev) {
+        const t = ev.target;
+        if (!paused || !t || t.tagName !== 'IMG' || !t.dataset.ktOrig) { return; }
+        hovered = t;
+        thaw(t);
+    }, true);
+    document.addEventListener('mouseout', function(ev) {
+        if (ev.target !== hovered) { return; }
+        const t = hovered;
+        hovered = null;
+        freeze(t);
+    }, true);
+    // Keep other tabs / popout chat in sync.
+    window.addEventListener('storage', function(ev) {
+        if (ev.key !== KEY) { return; }
+        paused = ev.newValue === '1';
+        apply();
+    });
+    //
+    // ---- switch inside Kick's chat settings panel -------------------------
+    function addStyle() {
+        if (styled) { return; }
+        styled = true;
+        const st = document.createElement('style');
+        st.textContent = [
+            '.kt-row{list-style:none;cursor:pointer}',
+            '.kt-row-inner{display:flex;align-items:center;justify-content:space-between;gap:8px;height:100%;min-height:40px;user-select:none}',
+            '.kt-switch{position:relative;flex:none;width:36px;height:20px;padding:0;border:0;border-radius:9999px;background:#474f54;cursor:pointer;transition:background-color .15s}',
+            '.kt-switch>span{display:block;width:14px;height:14px;border-radius:50%;background:#fff;transform:translateX(4px);transition:transform .15s}',
+            '.kt-switch[aria-checked="true"]{background:#53fc18}',
+            '.kt-switch[aria-checked="true"]>span{transform:translateX(18px);background:#0b0e0f}'
+        ].join('');
+        (document.head || document.documentElement).appendChild(st);
+    }
+    function ensureRow() {
+        const panel = document.getElementById('chat-settings-panel');
+        if (!panel) { return; }
+        // The main settings section renders as  div.w-full > ul  of rows.
+        const list = panel.querySelector('div.w-full > ul');
+        if (!list || list.querySelector('.kt-row')) { return; }
+        addStyle();
+        const ref = list.lastElementChild;
+        const row = document.createElement('li');
+        row.className = (ref ? ref.className + ' ' : '') + 'kt-row';
+        const inner = document.createElement('div');
+        const refInner = ref && ref.firstElementChild;
+        inner.className = (refInner && refInner.tagName === 'DIV' ? refInner.className + ' ' : '') + 'kt-row-inner';
+        const label = document.createElement('span');
+        label.textContent = 'Pause emote animations';
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'kt-switch';
+        sw.setAttribute('role', 'switch');
+        sw.setAttribute('aria-label', 'Pause emote animations');
+        sw.setAttribute('aria-checked', String(paused));
+        sw.appendChild(document.createElement('span'));
+        inner.appendChild(label);
+        inner.appendChild(sw);
+        row.appendChild(inner);
+        row.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setPaused(!paused);
+        });
+        list.appendChild(row);
+    }
+    //
+    // ---- one observer drives both -----------------------------------------
+    new MutationObserver(function(muts) {
+        if (paused) {
+            for (let i = 0; i < muts.length; i++) {
+                const m = muts[i];
+                if (m.type === 'attributes') {
+                    if (m.target.tagName === 'IMG') { freeze(m.target); }
+                    continue;
+                }
+                const added = m.addedNodes;
+                for (let j = 0; j < added.length; j++) { scan(added[j]); }
+            }
+        }
+        ensureRow();
+    }).observe(document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src']
+    });
+    apply();
+    ensureRow();
+})();
+
+!#endif
