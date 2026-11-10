@@ -3,6 +3,7 @@
     'use strict';
     if (window.ktLoaded) { return; }
     window.ktLoaded = true;
+    console.info('[kick-tweaks] loaded');
     const KEY = 'kt:pauseEmotes';
     const EMOTE_URL = 'files.kick.com/emotes/';
     const EMOTE_SEL = 'img[src*="' + EMOTE_URL + '"]';
@@ -156,14 +157,9 @@
         list.appendChild(row);
     }
     const QUALITY_KEY = 'stream_quality';
-    const QUALITY_MARK = 'kt:autoQuality';
     const LOGIN_MIN_PX = 1080;
-    let qualityPath = null;
     function onQualities(list) {
         if (!Array.isArray(list) || list.length === 0) { return; }
-        const path = location.pathname;
-        if (path === qualityPath) { return; }
-        qualityPath = path;
         const guest = document.querySelector('[data-testid="login"]') !== null;
         let top = 0;
         for (let i = 0; i < list.length; i++) {
@@ -173,12 +169,8 @@
             top = q.height;
         }
         if (top === 0) { return; }
-        const cur = sessionStorage.getItem(QUALITY_KEY);
-        let mark = null;
-        try { mark = JSON.parse(sessionStorage.getItem(QUALITY_MARK)); } catch (e) {}
-        if (cur !== null && mark && mark.path === path && cur !== String(mark.height)) { return; }
         sessionStorage.setItem(QUALITY_KEY, String(top));
-        sessionStorage.setItem(QUALITY_MARK, JSON.stringify({ path: path, height: top }));
+        console.info('[kick-tweaks] stream quality set to ' + top + 'p' + (guest ? ' (logged out: 1080p+ needs a Kick login)' : ''));
     }
     function onWorkerMessage(ev) {
         const arg = ev.data && ev.data.arg;
