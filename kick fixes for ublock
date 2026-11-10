@@ -1,3 +1,4 @@
+/// kick-tweaks.js
 (function() {
     'use strict';
     if (window.ktLoaded) { return; }
@@ -11,8 +12,6 @@
     let hovered = null;
     let styled = false;
     try { paused = localStorage.getItem(KEY) === '1'; } catch (e) {}
-    //
-    // ---- first-frame extraction -------------------------------------------
     function isAnimated(blob) {
         return blob.slice(0, 256).arrayBuffer().then(function(buf) {
             const b = new Uint8Array(buf);
@@ -38,7 +37,6 @@
             });
         });
     }
-    // Resolves to a blob: URL of the first frame, or null for static emotes.
     function getStill(src) {
         let p = stills.get(src);
         if (p) { return p; }
@@ -56,8 +54,6 @@
         stills.set(src, p);
         return p;
     }
-    //
-    // ---- freezing / thawing emote <img>s ----------------------------------
     function freeze(img) {
         if (!paused || img === hovered) { return; }
         const src = img.src;
@@ -97,7 +93,6 @@
         try { localStorage.setItem(KEY, value ? '1' : '0'); } catch (e) {}
         apply();
     }
-    // Hovering a frozen emote plays it; leaving freezes it again.
     document.addEventListener('mouseover', function(ev) {
         const t = ev.target;
         if (!paused || !t || t.tagName !== 'IMG' || !t.dataset.ktOrig) { return; }
@@ -110,14 +105,11 @@
         hovered = null;
         freeze(t);
     }, true);
-    // Keep other tabs / popout chat in sync.
     window.addEventListener('storage', function(ev) {
         if (ev.key !== KEY) { return; }
         paused = ev.newValue === '1';
         apply();
     });
-    //
-    // ---- switch inside Kick's chat settings panel -------------------------
     function addStyle() {
         if (styled) { return; }
         styled = true;
@@ -135,7 +127,6 @@
     function ensureRow() {
         const panel = document.getElementById('chat-settings-panel');
         if (!panel) { return; }
-        // The main settings section renders as  div.w-full > ul  of rows.
         const list = panel.querySelector('div.w-full > ul');
         if (!list || list.querySelector('.kt-row')) { return; }
         addStyle();
@@ -164,14 +155,6 @@
         });
         list.appendChild(row);
     }
-    //
-    // ---- start every stream at its highest quality ------------------------
-    // Kick's player reads sessionStorage "stream_quality" (a height) when it
-    // becomes ready and falls back to Auto, which is capped at 720p. The video
-    // worker announces the stream's quality list just before that, so the
-    // preference is written at that moment. A quality picked by hand is kept
-    // for as long as you stay on that channel. Logged-out viewers get the best
-    // quality Kick offers without an account (1080p and up needs a login).
     const QUALITY_KEY = 'stream_quality';
     const QUALITY_MARK = 'kt:autoQuality';
     const LOGIN_MIN_PX = 1080;
@@ -211,8 +194,6 @@
             }
         });
     }
-    //
-    // ---- one observer drives both -----------------------------------------
     new MutationObserver(function(muts) {
         if (paused) {
             for (let i = 0; i < muts.length; i++) {
