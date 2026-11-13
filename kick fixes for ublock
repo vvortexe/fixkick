@@ -85,7 +85,7 @@
         } else {
             document.querySelectorAll('img[data-kt-orig]').forEach(thaw);
         }
-        document.querySelectorAll('.kt-switch').forEach(function(sw) {
+        document.querySelectorAll('.kt-switch[data-kt="emotes"]').forEach(function(sw) {
             sw.setAttribute('aria-checked', String(paused));
         });
     }
@@ -120,42 +120,264 @@
             '.kt-row-inner{display:flex;align-items:center;justify-content:space-between;gap:8px;height:100%;min-height:40px;user-select:none}',
             '.kt-switch{position:relative;flex:none;width:36px;height:20px;padding:0;border:0;border-radius:9999px;background:#474f54;cursor:pointer;transition:background-color .15s}',
             '.kt-switch>span{display:block;width:14px;height:14px;border-radius:50%;background:#fff;transform:translateX(4px);transition:transform .15s}',
-            '.kt-switch[aria-checked="true"]{background:#53fc18}',
-            '.kt-switch[aria-checked="true"]>span{transform:translateX(18px);background:#0b0e0f}'
+            '.kt-switch[aria-checked="true"]{background:var(--edge-color-kick-voltGreen-150,#53fc18)}',
+            '.kt-switch[aria-checked="true"]>span{transform:translateX(18px);background:var(--edge-color-brand-fg-default,#0b0e0f)}',
+            '.kt-row-static{cursor:default}',
+            '.kt-color{display:flex;flex:none;align-items:center;gap:8px}',
+            '.kt-color-input{width:36px;height:22px;padding:0;border:1px solid #474f54;border-radius:6px;background:none;cursor:pointer}',
+            '.kt-color-input::-webkit-color-swatch-wrapper{padding:2px}',
+            '.kt-color-input::-webkit-color-swatch{border:0;border-radius:4px}',
+            '.kt-color-input::-moz-color-swatch{border:0;border-radius:4px}',
+            '.kt-color-reset{padding:2px 8px;border:0;border-radius:6px;background:#474f54;color:#fff;font-size:12px;cursor:pointer}',
+            '.kt-color-reset[hidden]{display:none}'
         ].join('');
         (document.head || document.documentElement).appendChild(st);
+    }
+    function rowShell(list, id, text) {
+        if (list.querySelector('.kt-row[data-kt="' + id + '"]')) { return null; }
+        addStyle();
+        let ref = list.lastElementChild;
+        while (ref && ref.classList.contains('kt-row')) { ref = ref.previousElementSibling; }
+        const row = document.createElement('li');
+        row.className = (ref ? ref.className + ' ' : '') + 'kt-row';
+        row.dataset.kt = id;
+        const inner = document.createElement('div');
+        const refInner = ref && ref.firstElementChild;
+        inner.className = (refInner && refInner.tagName === 'DIV' ? refInner.className + ' ' : '') + 'kt-row-inner';
+        const label = document.createElement('span');
+        label.textContent = text;
+        inner.appendChild(label);
+        row.appendChild(inner);
+        return { row: row, inner: inner };
+    }
+    function addRow(list, id, text, checked, onToggle) {
+        const shell = rowShell(list, id, text);
+        if (!shell) { return; }
+        const row = shell.row;
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'kt-switch';
+        sw.dataset.kt = id;
+        sw.setAttribute('role', 'switch');
+        sw.setAttribute('aria-label', text);
+        sw.setAttribute('aria-checked', String(checked));
+        sw.appendChild(document.createElement('span'));
+        shell.inner.appendChild(sw);
+        row.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            onToggle();
+        });
+        list.appendChild(row);
+    }
+    function addColorRow(list) {
+        const shell = rowShell(list, 'accent', 'Accent color');
+        if (!shell) { return; }
+        shell.row.classList.add('kt-row-static');
+        const box = document.createElement('span');
+        box.className = 'kt-color';
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.className = 'kt-color-input';
+        input.value = accent || DEFAULT_ACCENT;
+        input.setAttribute('aria-label', 'Accent color');
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'kt-color-reset';
+        reset.textContent = 'Reset';
+        reset.hidden = !accent;
+        input.addEventListener('input', function() { applyAccent(input.value); });
+        input.addEventListener('change', function() { setAccent(input.value); });
+        reset.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            setAccent('');
+        });
+        box.addEventListener('click', function(ev) { ev.stopPropagation(); });
+        box.appendChild(input);
+        box.appendChild(reset);
+        shell.inner.appendChild(box);
+        list.appendChild(shell.row);
     }
     function ensureRow() {
         const panel = document.getElementById('chat-settings-panel');
         if (!panel) { return; }
         const list = panel.querySelector('div.w-full > ul');
-        if (!list || list.querySelector('.kt-row')) { return; }
-        addStyle();
-        const ref = list.lastElementChild;
-        const row = document.createElement('li');
-        row.className = (ref ? ref.className + ' ' : '') + 'kt-row';
-        const inner = document.createElement('div');
-        const refInner = ref && ref.firstElementChild;
-        inner.className = (refInner && refInner.tagName === 'DIV' ? refInner.className + ' ' : '') + 'kt-row-inner';
-        const label = document.createElement('span');
-        label.textContent = 'Pause emote animations';
-        const sw = document.createElement('button');
-        sw.type = 'button';
-        sw.className = 'kt-switch';
-        sw.setAttribute('role', 'switch');
-        sw.setAttribute('aria-label', 'Pause emote animations');
-        sw.setAttribute('aria-checked', String(paused));
-        sw.appendChild(document.createElement('span'));
-        inner.appendChild(label);
-        inner.appendChild(sw);
-        row.appendChild(inner);
-        row.addEventListener('click', function(ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            setPaused(!paused);
-        });
-        list.appendChild(row);
+        if (!list) { return; }
+        addRow(list, 'emotes', 'Pause emote animations', paused, function() { setPaused(!paused); });
+        addRow(list, 'claim', 'Auto-claim rewards', autoClaim, function() { setAutoClaim(!autoClaim); });
+        addColorRow(list);
     }
+    const ACCENT_KEY = 'kt:accent';
+    const DEFAULT_ACCENT = '#53fc18';
+    const GREEN_SHADES = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000];
+    let accent = '';
+    let accentStyle = null;
+    try { accent = localStorage.getItem(ACCENT_KEY) || ''; } catch (e) {}
+    function validHex(c) {
+        return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+    }
+    function isLight(hex) {
+        const n = parseInt(hex.slice(1), 16);
+        const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function(v) {
+            v /= 255;
+            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2] > 0.18;
+    }
+    function shade(c, step) {
+        if (step === 150) { return c; }
+        if (step < 150) {
+            return 'color-mix(in oklab, ' + c + ' ' + (step === 50 ? 25 : 55) + '%, #fff)';
+        }
+        const pct = Math.round(100 - ((step - 150) / 850) * 90);
+        return 'color-mix(in oklab, ' + c + ' ' + pct + '%, #000)';
+    }
+    function accentCss(c) {
+        const vars = GREEN_SHADES.map(function(s) {
+            return '--edge-color-kick-voltGreen-' + s + ':' + shade(c, s);
+        });
+        vars.push('--edge-color-brand-fg-default:' + (isLight(c) ? '#0b0e0f' : '#fff'));
+        return [
+            ':root:root{' + vars.join(';') + '}',
+            '[class*="bg-[#53fc18]" i],[class*="bg-[#52fc18]" i]{background-color:' + c + '!important}',
+            '[class*="text-[#53fc18]" i]{color:' + c + '!important}',
+            '[class*="border-[#53fc18]" i]{border-color:' + c + '!important}',
+            '#nprogress .bar{background:' + c + '!important}',
+            '#nprogress .peg{box-shadow:0 0 10px ' + c + ',0 0 5px ' + c + '!important}',
+            '#nprogress .spinner-icon{border-top-color:' + c + '!important;border-left-color:' + c + '!important}',
+            'img[src*="static.kick.com/kick-logo"]{transform:translateY(-300px);filter:drop-shadow(0 300px 0 ' + c + ')}'
+        ].join('');
+    }
+    function applyAccent(c) {
+        if (!validHex(c) || c.toLowerCase() === DEFAULT_ACCENT) {
+            if (accentStyle) { accentStyle.remove(); accentStyle = null; }
+            return;
+        }
+        if (!accentStyle) {
+            accentStyle = document.createElement('style');
+            accentStyle.id = 'kt-accent';
+        }
+        accentStyle.textContent = accentCss(c);
+        if (!accentStyle.isConnected) {
+            (document.head || document.documentElement).appendChild(accentStyle);
+        }
+    }
+    function syncAccentUi() {
+        document.querySelectorAll('.kt-row[data-kt="accent"]').forEach(function(row) {
+            const input = row.querySelector('.kt-color-input');
+            const reset = row.querySelector('.kt-color-reset');
+            if (input) { input.value = accent || DEFAULT_ACCENT; }
+            if (reset) { reset.hidden = !accent; }
+        });
+    }
+    function setAccent(c) {
+        accent = validHex(c) && c.toLowerCase() !== DEFAULT_ACCENT ? c.toLowerCase() : '';
+        try {
+            if (accent) { localStorage.setItem(ACCENT_KEY, accent); } else { localStorage.removeItem(ACCENT_KEY); }
+        } catch (e) {}
+        applyAccent(accent);
+        syncAccentUi();
+    }
+    window.addEventListener('storage', function(ev) {
+        if (ev.key !== ACCENT_KEY) { return; }
+        accent = ev.newValue || '';
+        applyAccent(accent);
+        syncAccentUi();
+    });
+    applyAccent(accent);
+    const CLAIM_KEY = 'kt:autoClaim';
+    const CHALLENGES_URL = 'https://web.kick.com/api/v1/gamification/challenges';
+    const CLAIM_EVERY_MS = 2 * 60 * 1000;
+    const CLAIM_MAX_FAILS = 3;
+    const claimFails = new Map();
+    let autoClaim = true;
+    let claiming = false;
+    try { autoClaim = localStorage.getItem(CLAIM_KEY) !== '0'; } catch (e) {}
+    function sessionToken() {
+        const m = document.cookie.match(/(?:^|;\s*)session_token=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : null;
+    }
+    function kickApi(url, method, token) {
+        return fetch(url, {
+            method: method,
+            cache: 'no-cache',
+            credentials: 'include',
+            headers: {
+                Accept: 'application/json',
+                'x-app-platform': 'web',
+                Authorization: 'Bearer ' + token
+            }
+        }).then(function(r) {
+            if (!r.ok) { throw new Error('http ' + r.status); }
+            return r.json().catch(function() { return null; });
+        });
+    }
+    function challengesOf(body) {
+        const d = body && body.data;
+        if (Array.isArray(d)) { return d; }
+        if (d && Array.isArray(d.challenges)) { return d.challenges; }
+        return [];
+    }
+    function claimRewards() {
+        if (!autoClaim || claiming) { return; }
+        const token = sessionToken();
+        if (!token) { return; }
+        claiming = true;
+        const lists = [
+            CHALLENGES_URL,
+            CHALLENGES_URL + '?recurrence=one_off&condition_type=onboarding_completed'
+        ].map(function(url) {
+            return kickApi(url, 'GET', token).then(challengesOf, function() { return []; });
+        });
+        Promise.all(lists).then(function(results) {
+            const seen = new Set();
+            const todo = [];
+            results.forEach(function(list) {
+                list.forEach(function(c) {
+                    if (!c || !c.id || seen.has(c.id) || c.status !== 'claimable') { return; }
+                    if ((claimFails.get(c.id) || 0) >= CLAIM_MAX_FAILS) { return; }
+                    seen.add(c.id);
+                    todo.push(c);
+                });
+            });
+            return todo.reduce(function(chain, c) {
+                return chain.then(function() {
+                    const url = CHALLENGES_URL + '/' + encodeURIComponent(c.id) + '/claim';
+                    return kickApi(url, 'POST', token).then(function() {
+                        claimFails.delete(c.id);
+                        console.info('[kick-tweaks] claimed reward: ' + (c.name || c.id));
+                    }, function(err) {
+                        claimFails.set(c.id, (claimFails.get(c.id) || 0) + 1);
+                        console.warn('[kick-tweaks] claim failed for ' + (c.name || c.id) + ': ' + err.message);
+                    });
+                });
+            }, Promise.resolve());
+        }).then(function() {
+            claiming = false;
+        }, function() {
+            claiming = false;
+        });
+    }
+    function setAutoClaim(value) {
+        autoClaim = value;
+        try { localStorage.setItem(CLAIM_KEY, value ? '1' : '0'); } catch (e) {}
+        document.querySelectorAll('.kt-switch[data-kt="claim"]').forEach(function(sw) {
+            sw.setAttribute('aria-checked', String(autoClaim));
+        });
+        claimRewards();
+    }
+    window.addEventListener('storage', function(ev) {
+        if (ev.key !== CLAIM_KEY) { return; }
+        autoClaim = ev.newValue !== '0';
+        document.querySelectorAll('.kt-switch[data-kt="claim"]').forEach(function(sw) {
+            sw.setAttribute('aria-checked', String(autoClaim));
+        });
+    });
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) { claimRewards(); }
+    });
+    setInterval(claimRewards, CLAIM_EVERY_MS);
+    setTimeout(claimRewards, 5000);
     const QUALITY_KEY = 'stream_quality';
     const LOGIN_MIN_PX = 1080;
     function onQualities(list) {
@@ -197,6 +419,9 @@
                 const added = m.addedNodes;
                 for (let j = 0; j < added.length; j++) { scan(added[j]); }
             }
+        }
+        if (accentStyle && !accentStyle.isConnected) {
+            (document.head || document.documentElement).appendChild(accentStyle);
         }
         ensureRow();
     }).observe(document, {
